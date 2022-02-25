@@ -14,7 +14,9 @@ import os
 import math 
 import matplotlib.pyplot as plt
 import numpy as np 
+import copy
 import pickle 
+
 
 def from_file_to_dict(path, datafile, itemfile):
     ''' Load user-item matrix from specified file 
@@ -115,27 +117,25 @@ def data_stats(prefs, filename):
     
     print('Overall average rating: %.2f out of 5, and std of %.2f' %(totAvg,totStdev))
     
-    # determine the average item rating 
-    counter = 0
-    itemRatings = []
-    for i in items: 
-        totRat = 0
-        itemCounter = 0
-        for j in totItems: 
-            if i==j: 
-                itemCounter+=1
-                totRat += totRatings[counter]
-            counter+=1
-        totRat = totRat/itemCounter
-        itemRatings.append(totRat)
-        counter = 0
-        
-    itemAvg = 0
-    for i in itemRatings: 
-        itemAvg += i
-    itemAvg = itemAvg/len(itemRatings)
-    itemStdev = stdev(itemRatings, itemAvg)
-    print('Average item rating: %.2f out of 5, and std of %.2f' %(itemAvg, itemStdev))
+    # compute average item rating, standard dev (all users)  
+    avg = {}
+    count = {}
+    for r in prefs.values():
+        for k, v in r.items():
+            avg[k] = v + avg.get(k, 0)
+            count[k] = 1 + count.get(k, 0)
+          
+    avg_ir = 0
+    item_ratings = []
+    for i in range(0,totItems):
+        avgs = list(avg.values())[i] / list(count.values())[i]
+        avg_ir += avgs
+        item_ratings.append(avgs)
+
+    avg_ir = avg_ir / totItems
+    usd = np.std(item_ratings)
+
+    print("Average item rating: %.2f  out of 5, and std dev of %.2f" %(avg_ir, usd))
     
     #determine the average user rating and stdev 
     userRat = []
@@ -154,7 +154,21 @@ def data_stats(prefs, filename):
     userAvg = userAvg/len(userRat)
     userStdev = stdev(userRat, userAvg)
     print('Average user rating: %.2f out of 5, and std of %.2f' %(userAvg, userStdev))
-    
+
+    #Determine average number of ratings per user
+    aveNum=(totRatings/len(prefs))
+    sumOfSquares=0
+    maxMinMed=[]
+    for user_list in prefs.values():
+        sumOfSquares+=(len(user_list)-aveNum)**2
+        maxMinMed.append(len(user_list))
+    stdevNum=(sumOfSquares/len(prefs))**0.5
+    print('Average Number of Ratings Per User: %.2f out of 5, and Standard Deviation of Items: %.2f' %(aveNum, stdevNum))
+
+    #Min, Max, Median number of ratings per user
+    print('Max number of Ratings Per Uer: %.2f' %(max(maxMinMed)))
+    print('Min number of Ratings Per Uer: %.2f' %(min(maxMinMed)))
+    print('Median number of Ratings Per Uer: %.2f' %(np.median(maxMinMed)))
     #determine sparsity 
     sparsity = (1 - (len(totRatings)/(len(names)*len(items))))*100
     sparsity = round(sparsity, 2)
@@ -366,6 +380,53 @@ def getRecommendations(prefs,person,similarity=sim_pearson):
     return rankings
 
 
+#change this to bryce's code
+def getRecommendationsSim(prefs,person,similarity=sim_pearson):
+    '''
+        Calculates recommendations for a given user 
+
+        Parameters:
+        -- prefs: dictionary containing user-item matrix
+        -- person: string containing name of user
+        -- similarity: function to calc similarity (sim_pearson is default)
+        
+        Returns:
+        -- A list of recommended items with 0 or more tuples, 
+           each tuple contains (predicted rating, item name).
+           List is sorted, high to low, by predicted rating.
+           An empty list is returned when no recommendations have been calc'd.
+        
+    '''
+    
+    totals={}
+    simSums={}
+    for other in prefs:
+      # don't compare me to myself
+        if other==person: 
+            continue
+        sim=similarity(prefs,person,other)
+    
+        # ignore scores of zero or lower
+        if sim<=0: continue
+        for item in prefs[other]:
+            
+            # only score movies I haven't seen yet
+            if item not in prefs[person] or prefs[person][item]==0:
+                # Similarity * Score
+                totals.setdefault(item,0)
+                totals[item]+=prefs[other][item]*sim
+                # Sum of similarities
+                simSums.setdefault(item,0)
+                simSums[item]+=sim
+  
+    # Create the normalized list
+    rankings=[(total/simSums[item],item) for item,total in totals.items()]
+  
+    # Return the sorted list
+    rankings.sort()
+    rankings.reverse()
+    return rankings
+
 def get_all_UU_recs(prefs, sim=sim_pearson, num_users=10, top_N=5):
     ''' 
     Print user-based CF recommendations for all users in dataset
@@ -407,30 +468,42 @@ def loo_cv(prefs, metric, sim, algo):
          error_total: MSE, MAE, RMSE totals for this set of conditions
          error_list: list of actual-predicted differences
     """
+    
     temp = prefs
     errorList = []
     meanError = 0
+    counter = 0
     for name in prefs.keys(): #for every name
         lst = list(temp[name].keys()) #create a list of movies 
         for i in range(len(lst)): #for every movie 
             value = prefs[name][lst[i]] #save the rating 
             del temp[name][lst[i]] #remove the movie from temp 
-            if sim == "sim_pearson": #find the recommendation 
-                results = getRecommendations(temp, name)
-            else: 
-                results = getRecommendations(temp, name, sim_distance)
+            if sim == "sim_pearson" and algo == "getRecommendationsSim": #find the recommendation 
+                results = getRecommendationsSim(temp, name)
+            if sim == "sim_distance" and algo == "getRecommendedItems": 
+                results = getRecommendedItems(temp, name)
+            if sim == "sim_pearson" and algo == "getRecommendationsSim": 
+                results = getRecommendationsSim(temp, name, sim_pearson)
+            if sim == "sim_distance" and algo == "getRecommendedItems": 
+                results = getRecommendedItems(temp, name, sim_pearson)
             temp[name][lst[i]] = value #replace the deleated values 
             for j in range(len(results)): 
                 if results[j][1] == lst[i]: #if the recommendation contains the movie 
-                    error = (results[j][0] - prefs[name][lst[i]])**2
+                    if metric == 'MSE' or metric == 'RMSE': 
+                        error = (results[j][0] - prefs[name][lst[i]])**2
+                    if metric == 'MAE': 
+                        error = abs(results[j][0] - prefs[name][lst[i]])
+                    errorList.append(error)
+                    meanError += error 
                     errorList.append(error) #determine the error and print infomration 
                     meanError += error
-                    print("User: %s, item: %s, Prediction: %f, Actual: %f, Sq Error: %f" %(name, lst[i], results[j][0], value, error))
-    if metric == "MSE": 
-        N = len(errorList) #calculate the mean square error 
-        meanError = meanError/N
-        print("%s for critics: %f using <function %s at 0x7fba06122940>" %(metric, meanError, sim))
+                    if(len(prefs) > 100) and (counter < 50): 
+                        print("User: %s, item: %s, Prediction: %f, Actual: %f, Sq Error: %f" %(name, lst[i], results[j][0], value, error))
+            counter+=1 
 
+    if metric == "RMSE": 
+        meanError = np.sqrt(meanError)
+    
     return meanError, errorList
             
 
@@ -505,6 +578,34 @@ def calculateSimilarItems(prefs,n=10,similarity=sim_pearson):
         # Find the most similar items to this one
         scores=topMatches(itemPrefs,item,similarity,n=n)
         result[item] = scores
+    return result
+
+def calculateSimilarUsers(prefs,n=10,similarity=sim_pearson):
+    '''
+        Creates a dictionary of users showing which other users they are most 
+        similar to. 
+
+        Parameters:
+        -- prefs: dictionary containing user-item matrix
+        -- n: number of similar matches for topMatches() to return
+        -- similarity: function to calc similarity (sim_pearson is default)
+        
+        Returns:
+        -- A dictionary with a similarity matrix
+        
+    '''     
+    result={}
+    c=0
+    for user in prefs:
+      # Status updates for larger datasets
+        c+=1
+        if c%100==0: 
+            print ("%d / %d") % (c,len(prefs))
+            
+        # Find the most similar items to this one
+        scores=topMatches(prefs,user,similarity,n=n)
+        result[user] = scores
+        
     return result
 
 def getRecommendedItems(prefs,itemMatch,user):
@@ -586,36 +687,33 @@ def loo_cv_sim(prefs, metric, sim, algo, sim_matrix):
 	 error_list: list of actual-predicted differences
     """
     print("Number of users processed: 0")
-    error_list = []
-    error_total  = 0
-    temp = prefs # create a temp list 
-    for name in prefs.keys(): 
-        lst = list(temp[name].keys()) #create a list of items 
-        for i in range(len(lst)): 
-            ans = False #create boolean to determine if has recommendation 
-            value = prefs[name][lst[i]]
-            del temp[name][lst[i]]# save value and delete from temp 
-            result = getRecommendedItems(temp, sim_matrix, name) #get recommendations 
-            temp[name][lst[i]] = value #replace the value 
-            for j in range(len(result)): 
-                if result[j][1] == lst[i]: #if the result matches the item 
-                    error = 0 #calculate the error based on instruction 
-                    if metric == 'MSE' or metric == 'RMSE': 
-                        error = (result[j][0] - prefs[name][lst[i]])**2
-                    if metric == 'MAE': 
-                        error = abs(result[j][0] - prefs[name][lst[i]])
+    #Calls the getRecommendationsSim() function for User-Based recommendations and
+    #getRecommendedItems for Item-Based recommendations via parameter    
+    error=0
+    error_list=[]
+    temp=copy.deepcopy(prefs)
+    for x in prefs:
+        for y in prefs[x]:
+            del temp[x][y]
+            if algo==getRecommendationsSim:
+                recs=getRecommendationsSim(temp,sim_matrix,x)
+            elif algo==getRecommendedItems:    
+                recs=getRecommendedItems(temp, sim_matrix, x)
+            temp=copy.deepcopy(prefs)
+            for z in recs:
+                if z[1]==y:
+                    error=(z[0]-prefs[x][y])**2
                     error_list.append(error)
-                    error_total += error 
-                    print("User: %s, item: %s, Prediction: %f, Actual: %f, Error: %f" %(name, lst[i], result[j][0], prefs[name][lst[i]], error))
-                    ans = True #set boolean to true 
-            if ans == False: #if not in the result list 
-                print("From loo_cv_sim(), No prediction calculated for item %s, user %s in pred_list: %s" %(lst[i], name, str(result)))
-
-    N = len(error_list) #calculate final error
-    error_total = error_total/N
-    if metric == "RMSE": 
-        error_total = np.sqrt(error_total)
-    return error_total, error_list
+                    if prefs.indexOf(x)<50:
+                        print('User:' ,x,', Item:',y,', Prediction:',z[0],', Actual:', prefs[x][y],', Sq Error:', error)
+    error=[0,0,0] #MSE, RMSE, and MAE respectively 
+    if len(error_list)!=0:
+        error[0]==sum(error_list)/len(error_list)
+        error[1]=sum(error_list)/len(error_list)
+        error[2]=sum(error_list)/len(error_list)
+    else:
+        error=[0,0,0]
+    return error, error_list
         
 def main():
     ''' User interface for Python console '''
@@ -623,7 +721,7 @@ def main():
     # Load critics dict from file
     path = os.getcwd() # this gets the current working directory
                        # you can customize path for your own computer here
-    #path = path + '/Desktop/starter' #need to run correct path on my laptop
+    path = path + '/Desktop/starter' #need to run correct path on my laptop
     print('\npath: %s' % path) # debug
     done = False
     prefs = {}
@@ -632,6 +730,7 @@ def main():
         print()
         # Start a simple dialog
         file_io = input('R(ead) critics data from file?, \n'
+                        'RML(ead ml100K data)?, \n'
                         'P(rint) the U-I matrix?, \n'
                         'V(alidate) the dictionary?, \n'
                         'S(tats) print? \n'
@@ -641,6 +740,7 @@ def main():
                         'LCV(eave one out cross-validation)?\n'
                         'LCVSIM(eave one out cross-validation)?\n'
                         'Sim(ilarity matrix) calc for Item-based recommender?\n'
+                        'Simu(ilarity matrix) calc for User-based recommender?\n'
                         'I(tem-based CF Recommendations)?, \n==> ')
                         
         
@@ -653,6 +753,16 @@ def main():
             prefs = from_file_to_dict(path, file_dir+datafile, file_dir+itemfile)
             print('Number of users: %d\nList of users:' % len(prefs), 
                   list(prefs.keys()))
+
+        elif file_io == 'RML' or file_io == 'rml':
+            print()
+            file_dir = 'data/ml-100k/' # path from current directory
+            datafile = 'u.data'  # ratings file
+            itemfile = 'u.item'  # movie titles file            
+            print ('Reading "%s" dictionary from file' % datafile)
+            prefs = from_file_to_dict(path, file_dir+datafile, file_dir+itemfile)
+            print('Number of users: %d\nList of users [0:10]:' 
+                      % len(prefs), list(prefs.keys())[0:10] )
             
         elif file_io == 'P' or file_io == 'p':
             # print the u-i matrix
@@ -741,18 +851,11 @@ def main():
                 user_name = 'Toby'
                 print ('User-based CF recs for %s, sim_pearson: ' % (user_name), 
                        getRecommendations(prefs, user_name)) 
-                        # [(3.3477895267131017, 'The Night Listener'), 
-                        #  (2.8325499182641614, 'Lady in the Water'), 
-                        #  (2.530980703765565, 'Just My Luck')]
                 print ('User-based CF recs for %s, sim_distance: ' % (user_name),
                        getRecommendations(prefs, user_name, similarity=sim_distance)) 
-                        # [(3.457128694491423, 'The Night Listener'), 
-                        #  (2.778584003814924, 'Lady in the Water'), 
-                        #  (2.422482042361917, 'Just My Luck')]
                 print()
                 
                 print('User-based CF recommendations for all users:')
-                # Calc User-based CF recommendations for all users
                 print("Using sim_pearson:")
                 get_all_UU_recs(prefs)
                 print()
@@ -768,16 +871,77 @@ def main():
             print()
             if len(prefs) > 0:             
                 print ('Example:')            
-                ## add some code here to calc LOOCV 
-                ## write a new function to do this ..
                 print("LOO_CV Evaluation")
-                loo_cv(prefs, "MSE", "sim_pearson", "user")
+                sim = sim_pearson
+                metric = "MSE"
+                error, error_list = loo_cv(prefs, "MSE", "sim_pearson", "user")
+                error = error/len(error_list)
+                print("%s for critics: %f using %s" %(metric, error, sim))
                 print()
-                loo_cv(prefs, "MSE", 'sim_distance', "user")
+                sim = sim_distance
+                error, error_list = loo_cv(prefs, "MSE", 'sim_distance', "user")
+                error = error/len(error_list)
+                print("%s for critics: %f using %s" %(metric, error, sim))
+
             else:
                 print ('Empty dictionary, R(ead) in some data!')   
 
         elif file_io == 'Sim' or file_io == 'sim':
+            
+            if len(prefs) > 0: 
+                ready = False # sub command in progress
+                sub_cmd = input('RD(ead) distance or RP(ead) pearson or WD(rite) distance or WP(rite) pearson? ')
+                try:
+                    if sub_cmd == 'RD' or sub_cmd == 'rd':
+                        # Load the dictionary back from the pickle file.
+                        itemsim = pickle.load(open( "save_itemsim_distance.p", "rb" ))
+                        sim_method = 'sim_distance'
+    
+                    elif sub_cmd == 'RP' or sub_cmd == 'rp':
+                        # Load the dictionary back from the pickle file.
+                        itemsim = pickle.load(open( "save_itemsim_pearson.p", "rb" ))  
+                        sim_method = 'sim_pearson'
+                        
+                    elif sub_cmd == 'WD' or sub_cmd == 'wd':
+                        # transpose the U-I matrix and calc item-item similarities matrix
+                        itemsim = calculateSimilarItems(prefs,similarity=sim_distance)                     
+                        # Dump/save dictionary to a pickle file
+                        pickle.dump(itemsim, open( "save_itemsim_distance.p", "wb" ))
+                        sim_method = 'sim_distance'
+                        
+                    elif sub_cmd == 'WP' or sub_cmd == 'wp':
+                        # transpose the U-I matrix and calc item-item similarities matrix
+                        itemsim = calculateSimilarItems(prefs,similarity=sim_pearson)                     
+                        # Dump/save dictionary to a pickle file
+                        pickle.dump(itemsim, open( "save_itemsim_pearson.p", "wb" )) 
+                        sim_method = 'sim_pearson'
+                    
+                    else:
+                        print("Sim sub-command %s is invalid, try again" % sub_cmd)
+                        continue
+                    
+                    ready = True # sub command completed successfully
+                    
+                except Exception as ex:
+                    print ('Error!!', ex, '\nNeed to W(rite) a file before you can R(ead) it!'
+                           ' Enter Sim(ilarity matrix) again and choose a Write command')
+                    print()
+                
+                if len(itemsim) > 0 and ready == True: 
+                    # Only want to print if sub command completed successfully
+                    print ('Similarity matrix based on %s, len = %d' 
+                           % (sim_method, len(itemsim)))
+                    print()
+                    movies = itemsim.keys()
+                    for i in movies: 
+                        print(i, end='')
+                        print(itemsim[i])
+                print()
+                
+            else:
+                print ('Empty dictionary, R(ead) in some data!')
+
+        elif file_io == 'Simu' or file_io == 'simu':
             
             if len(prefs) > 0: 
                 ready = False # sub command in progress
@@ -840,51 +1004,10 @@ def main():
     
                 print ('Item-based CF recs for %s, %s: ' % (user_name, sim_method), 
                        getRecommendedItems(prefs, itemsim, user_name)) 
-                
-                ##
-                ## Example:
-                ## Item-based CF recs for Toby, sim_distance:  
-                ##     [(3.1667425234070894, 'The Night Listener'), 
-                ##      (2.9366294028444346, 'Just My Luck'), 
-                ##      (2.868767392626467, 'Lady in the Water')]
-                ##
-                ## Example:
-                ## Item-based CF recs for Toby, sim_pearson:  
-                ##     [(3.610031066802183, 'Lady in the Water')]
-                ##
     
                 print()
-                
                 print('Item-based CF recommendations for all users:')
-                # Calc Item-based CF recommendations for all users
-        
-                ## add some code above main() to calc Item-based CF recommendations 
-                ## ==> write a new function to do this, as follows
-                    
-                get_all_II_recs(prefs, itemsim, sim_method) # num_users=10, and top_N=5 by default  '''
-                # Note that the item_sim dictionry and the sim_method string are
-                #   setup in the main() Sim command
-                
-                ## Expected Results ..
-                
-                ## Item-based CF recs for all users, sim_distance:  
-                ## Item-based CF recommendations for all users:
-                ## Item-based CF recs for Lisa, sim_distance:  []
-                ## Item-based CF recs for Gene, sim_distance:  []
-                ## Item-based CF recs for Michael, sim_distance:  [(3.2059731906295044, 'Just My Luck'), (3.1471787551061103, 'You, Me and Dupree')]
-                ## Item-based CF recs for Claudia, sim_distance:  [(3.43454674373048, 'Lady in the Water')]
-                ## Item-based CF recs for Mick, sim_distance:  []
-                ## Item-based CF recs for Jack, sim_distance:  [(3.5810970647618663, 'Just My Luck')]
-                ## Item-based CF recs for Toby, sim_distance:  [(3.1667425234070894, 'The Night Listener'), (2.9366294028444346, 'Just My Luck'), (2.868767392626467, 'Lady in the Water')]
-                ##
-                ## Item-based CF recommendations for all users:
-                ## Item-based CF recs for Lisa, sim_pearson:  []
-                ## Item-based CF recs for Gene, sim_pearson:  []
-                ## Item-based CF recs for Michael, sim_pearson:  [(4.0, 'Just My Luck'), (3.1637361366111816, 'You, Me and Dupree')]
-                ## Item-based CF recs for Claudia, sim_pearson:  [(3.4436241497684494, 'Lady in the Water')]
-                ## Item-based CF recs for Mick, sim_pearson:  []
-                ## Item-based CF recs for Jack, sim_pearson:  [(3.0, 'Just My Luck')]
-                ## Item-based CF recs for Toby, sim_pearson:  [(3.610031066802183, 'Lady in the Water')]
+                get_all_II_recs(prefs, itemsim, sim_method) 
                     
                 print()
                 
