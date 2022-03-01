@@ -674,7 +674,6 @@ def loo_cv_sim(prefs, metric, sim, algo, sim_matrix):
 def getRecommendationsSim(prefs, person, similarity):
     '''
         Calculates recommendations for a given user 
-
         Parameters:
         -- prefs: dictionary containing user-item matrix
         -- person: string containing name of user
@@ -688,13 +687,10 @@ def getRecommendationsSim(prefs, person, similarity):
         
     '''
 
-    ui_matrix= calculateSimilarUsers(prefs, 10, similarity)
+    
     #print(ui_matrix[person])
 
-    #return 0
-
-    totals={}
-    simSums={}
+    
     """
     for i in movies: 
         if unrated by person: 
@@ -705,9 +701,33 @@ def getRecommendationsSim(prefs, person, similarity):
                     num+=1 
         rating = rating/num
         results[movie] = rating 
-
     """
-   
+    ui_matrix= calculateSimilarUsers(prefs, 10, similarity) #tuples 
+    totals={}
+    simSums={}
+    spec_sim = 0
+    for other in prefs:
+      # don't compare me to myself
+        if other==person: 
+            continue
+        sim=ui_matrix[person] # list of tuples 
+        print(sim) #should be a list of tuples with user as tup[1] and sim as tup[0]
+    
+        for item in prefs[other]:
+            
+            # only score movies I haven't seen yet
+            if item not in prefs[person] or prefs[person][item]==0:
+                for tup in sim:
+                    if tup[1] == item: #may need to be flipped order in tup based on line 696 output 
+                        spec_sim = tup[0]
+                
+
+                # Similarity * Score
+                totals.setdefault(item,0)
+                totals[item]+=prefs[other][item]*spec_sim# want sim other to be a specified tuple 
+                # Sum of similarities
+                simSums.setdefault(item,0)
+                simSums[item]+=sim
 
     # Create the normalized list
     rankings=[(total/simSums[item],item) for item,total in totals.items()]
@@ -716,6 +736,7 @@ def getRecommendationsSim(prefs, person, similarity):
     rankings.sort()
     rankings.reverse()
     return rankings
+
 
 
 def main():
