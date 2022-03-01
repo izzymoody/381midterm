@@ -169,6 +169,7 @@ def data_stats(prefs, filename):
     print('Max number of Ratings Per Uer: %.2f' %(max(maxMinMed)))
     print('Min number of Ratings Per Uer: %.2f' %(min(maxMinMed)))
     print('Median number of Ratings Per Uer: %.2f' %(np.median(maxMinMed)))
+    
     #determine sparsity 
     sparsity = (1 - (len(totRatings)/(len(names)*len(items))))*100
     sparsity = round(sparsity, 2)
@@ -380,53 +381,6 @@ def getRecommendations(prefs,person,similarity=sim_pearson):
     return rankings
 
 
-#change this to bryce's code
-def getRecommendationsSim(prefs,person,similarity=sim_pearson):
-    '''
-        Calculates recommendations for a given user 
-
-        Parameters:
-        -- prefs: dictionary containing user-item matrix
-        -- person: string containing name of user
-        -- similarity: function to calc similarity (sim_pearson is default)
-        
-        Returns:
-        -- A list of recommended items with 0 or more tuples, 
-           each tuple contains (predicted rating, item name).
-           List is sorted, high to low, by predicted rating.
-           An empty list is returned when no recommendations have been calc'd.
-        
-    '''
-    
-    totals={}
-    simSums={}
-    for other in prefs:
-      # don't compare me to myself
-        if other==person: 
-            continue
-        sim=similarity(prefs,person,other)
-    
-        # ignore scores of zero or lower
-        if sim<=0: continue
-        for item in prefs[other]:
-            
-            # only score movies I haven't seen yet
-            if item not in prefs[person] or prefs[person][item]==0:
-                # Similarity * Score
-                totals.setdefault(item,0)
-                totals[item]+=prefs[other][item]*sim
-                # Sum of similarities
-                simSums.setdefault(item,0)
-                simSums[item]+=sim
-  
-    # Create the normalized list
-    rankings=[(total/simSums[item],item) for item,total in totals.items()]
-  
-    # Return the sorted list
-    rankings.sort()
-    rankings.reverse()
-    return rankings
-
 def get_all_UU_recs(prefs, sim=sim_pearson, num_users=10, top_N=5):
     ''' 
     Print user-based CF recommendations for all users in dataset
@@ -478,13 +432,13 @@ def loo_cv(prefs, metric, sim, algo):
         for i in range(len(lst)): #for every movie 
             value = prefs[name][lst[i]] #save the rating 
             del temp[name][lst[i]] #remove the movie from temp 
-            if sim == "sim_pearson" and algo == "getRecommendationsSim": #find the recommendation 
-                results = getRecommendationsSim(temp, name)
-            if sim == "sim_distance" and algo == "getRecommendedItems": 
-                results = getRecommendedItems(temp, name)
-            if sim == "sim_pearson" and algo == "getRecommendationsSim": 
+            if sim == "sim_pearson" and algo == "user": #find the recommendation 
+                results = getRecommendationsSim(temp, name, sim_distance)
+            if sim == "sim_distance" and algo == "item": 
+                results = getRecommendedItems(temp, name, sim_distance)
+            if sim == "sim_pearson" and algo == "user": 
                 results = getRecommendationsSim(temp, name, sim_pearson)
-            if sim == "sim_distance" and algo == "getRecommendedItems": 
+            if sim == "sim_distance" and algo == "item": 
                 results = getRecommendedItems(temp, name, sim_pearson)
             temp[name][lst[i]] = value #replace the deleated values 
             for j in range(len(results)): 
@@ -628,7 +582,7 @@ def getRecommendedItems(prefs,itemMatch,user):
     scores={}
     totalSim={}
     # Loop over items rated by this user
-    for (item,rating) in userRatings.items( ):
+    for (item,rating) in userRatings.items():
   
       # Loop over items similar to this one
         for (similarity,item2) in itemMatch[item]:
@@ -670,6 +624,8 @@ def get_all_II_recs(prefs, itemsim, sim_method, num_users=10, top_N=5):
         user_name = i 
         print ('Item-based CF recs for %s, %s: ' % (user_name, sim_method), 
                        getRecommendedItems(prefs, itemsim, user_name)) 
+
+
 
 def loo_cv_sim(prefs, metric, sim, algo, sim_matrix):
     """
@@ -714,7 +670,54 @@ def loo_cv_sim(prefs, metric, sim, algo, sim_matrix):
     else:
         error=[0,0,0]
     return error, error_list
+
+def getRecommendationsSim(prefs, person, similarity):
+    '''
+        Calculates recommendations for a given user 
+
+        Parameters:
+        -- prefs: dictionary containing user-item matrix
+        -- person: string containing name of user
+        -- similarity: function to calc similarity (sim_pearson is default)
         
+        Returns:
+        -- A list of recommended items with 0 or more tuples, 
+           each tuple contains (predicted rating, item name).
+           List is sorted, high to low, by predicted rating.
+           An empty list is returned when no recommendations have been calc'd.
+        
+    '''
+
+    ui_matrix= calculateSimilarUsers(prefs, 10, similarity)
+    #print(ui_matrix[person])
+
+    #return 0
+
+    totals={}
+    simSums={}
+    """
+    for i in movies: 
+        if unrated by person: 
+            for j in ui_matrix[person]: 
+                other = j[1]
+                if rated by other:
+                    rating += j[0]*otherRating
+                    num+=1 
+        rating = rating/num
+        results[movie] = rating 
+
+    """
+   
+
+    # Create the normalized list
+    rankings=[(total/simSums[item],item) for item,total in totals.items()]
+
+    # Return the sorted list
+    rankings.sort()
+    rankings.reverse()
+    return rankings
+
+
 def main():
     ''' User interface for Python console '''
     
